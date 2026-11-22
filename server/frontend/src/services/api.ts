@@ -61,7 +61,7 @@ export async function refreshToken(): Promise<boolean> {
         return false;
       }
       const data = await res.json();
-      setTokens({ ...tokens, access: data.access });
+      setTokens({ access: data.access, refresh: data.refresh || tokens.refresh });
       return true;
     } catch {
       setTokens(null);

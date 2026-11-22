@@ -352,7 +352,7 @@ export function StudentWorkspace() {
       await flushEvents();
       const updated = await api<WorkspaceData>(workspaceUrl + 'submit/', {
         method: 'POST',
-        body: { code: currentCode.current },
+        body: { code: currentCode.current, stdin },
       });
       setData(updated);
       showToast('Submitted. Your teacher will review it.');

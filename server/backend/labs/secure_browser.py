@@ -13,9 +13,13 @@ This is the same idea as Safe Exam Browser's "Browser Exam Key".
 """
 import hashlib
 import hmac
+import logging
 import time
 
 from django.conf import settings
+from django.core.cache import cache
+
+logger = logging.getLogger("labora.security")
 
 
 def compute_signature(key: str, ts: str, method: str, path: str) -> str:
@@ -24,15 +28,40 @@ def compute_signature(key: str, ts: str, method: str, path: str) -> str:
 
 
 def is_secure_browser_request(request) -> bool:
+    # Memoize within the lifecycle of the same request object
+    if hasattr(request, "_is_secure_browser_cached"):
+        return request._is_secure_browser_cached
+
     ts = request.headers.get("X-Labora-Ts", "")
     sig = request.headers.get("X-Labora-Signature", "")
     if not ts or not sig:
+        request._is_secure_browser_cached = False
         return False
+
     try:
         ts_int = int(ts)
     except ValueError:
+        request._is_secure_browser_cached = False
         return False
-    if abs(time.time() - ts_int) > settings.SECURE_BROWSER_MAX_SKEW_SECONDS:
+
+    max_skew = getattr(settings, "SECURE_BROWSER_MAX_SKEW_SECONDS", 300)
+    if abs(time.time() - ts_int) > max_skew:
+        request._is_secure_browser_cached = False
         return False
+
+    # Check for replay attack: has this exact signature been received in a previous request?
+    cache_key = f"labora_sb_sig_{sig}"
+    if cache.get(cache_key):
+        logger.warning(f"Rejected replayed Secure Browser signature: {sig[:12]}...")
+        request._is_secure_browser_cached = False
+        return False
+
     expected = compute_signature(settings.SECURE_BROWSER_KEY, ts, request.method, request.get_full_path())
-    return hmac.compare_digest(expected, sig)
+    if not hmac.compare_digest(expected, sig):
+        request._is_secure_browser_cached = False
+        return False
+
+    # Store signature in cache until its skew window expires to block replay attacks across requests
+    cache.set(cache_key, 1, timeout=max_skew * 2)
+    request._is_secure_browser_cached = True
+    return True

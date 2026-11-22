@@ -19,8 +19,19 @@ from .serializers import (CollegeSettingsSerializer, DepartmentSerializer, MeSer
                           UserSerializer)
 
 
+from rest_framework_simplejwt.views import TokenRefreshView
+
+
 class LoginThrottle(AnonRateThrottle):
-    rate = "20/min"
+    scope = "login"
+
+
+class RefreshThrottle(AnonRateThrottle):
+    scope = "refresh"
+
+
+class ThrottledTokenRefreshView(TokenRefreshView):
+    throttle_classes = [RefreshThrottle]
 
 
 @api_view(["POST"])
@@ -36,6 +47,19 @@ def login(request):
     refresh = RefreshToken.for_user(user)
     return Response({"access": str(refresh.access_token), "refresh": str(refresh),
                      "user": MeSerializer(user).data})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def logout(request):
+    refresh_token = request.data.get("refresh")
+    if refresh_token:
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except Exception:
+            pass
+    return Response({"detail": "Successfully logged out."})
 
 
 @api_view(["GET"])
@@ -95,12 +119,24 @@ class UserViewSet(viewsets.ModelViewSet):
             qs = qs.filter(role=role)
         return qs
 
+    @action(detail=True, methods=["post"], url_path="set-password")
+    def set_password(self, request, pk=None):
+        user = self.get_object()
+        new_password = (request.data.get("password") or "").strip()
+        if len(new_password) < 6:
+            return Response({"detail": "Password must be at least 6 characters."}, status=status.HTTP_400_BAD_REQUEST)
+        user.set_password(new_password)
+        user.save()
+        return Response({"detail": f"Password updated for {user.username}."})
+
     @action(detail=False, methods=["post"], url_path="import")
     def import_csv(self, request):
         """CSV columns: username,password,first_name,last_name,role,roll_no,batch,semester,department_code"""
         f = request.FILES.get("file")
         if not f:
             return Response({"detail": "Upload a CSV file as 'file'."}, status=400)
+        if f.size > 5 * 1024 * 1024:
+            return Response({"detail": "File too large (max 5 MB)."}, status=status.HTTP_400_BAD_REQUEST)
         reader = csv.DictReader(io.StringIO(f.read().decode("utf-8-sig")))
         depts = {d.code: d for d in Department.objects.all()}
         created, errors = 0, []
@@ -134,6 +170,9 @@ def college_settings(request):
         return Response(CollegeSettingsSerializer(cs).data)
     if not request.user.is_admin_role:
         return Response({"detail": "Admin only."}, status=403)
+    logo = request.FILES.get("logo")
+    if logo and logo.size > 2 * 1024 * 1024:
+        return Response({"detail": "Logo file too large (max 2 MB)."}, status=status.HTTP_400_BAD_REQUEST)
     ser = CollegeSettingsSerializer(cs, data=request.data, partial=True)
     ser.is_valid(raise_exception=True)
     ser.save()

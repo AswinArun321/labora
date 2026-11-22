@@ -17,7 +17,8 @@ router.register("practicals", labs.PracticalViewSet, basename="practical")
 
 api = [
     path("auth/login/", acc.login),
-    path("auth/refresh/", TokenRefreshView.as_view()),
+    path("auth/refresh/", acc.ThrottledTokenRefreshView.as_view()),
+    path("auth/logout/", acc.logout),
     path("auth/me/", acc.me),
     path("client-status/", acc.client_status),
     path("college-settings/", acc.college_settings),

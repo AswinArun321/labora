@@ -47,8 +47,8 @@ describe('API client and token management', () => {
     await expect(api('/bad-endpoint/')).rejects.toThrow('Invalid credentials');
   });
 
-  it('refreshes token on 401 when refresh token is available', async () => {
-    setTokens({ access: 'expired-access', refresh: 'valid-refresh' });
+  it('refreshes token on 401 and updates rotated refresh token when returned', async () => {
+    setTokens({ access: 'expired-access', refresh: 'old-refresh' });
 
     let callCount = 0;
     global.fetch = vi.fn().mockImplementation((url: string) => {
@@ -57,7 +57,10 @@ describe('API client and token management', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: async () => ({ access: 'new-access-token' }),
+          json: async () => ({
+            access: 'rotated-access',
+            refresh: 'rotated-refresh',
+          }),
         });
       }
       if (callCount === 1) {
@@ -76,6 +79,7 @@ describe('API client and token management', () => {
 
     const res = await api('/protected/');
     expect(res).toEqual({ data: 'authorized' });
-    expect(getTokens()?.access).toBe('new-access-token');
+    expect(getTokens()?.access).toBe('rotated-access');
+    expect(getTokens()?.refresh).toBe('rotated-refresh');
   });
 });

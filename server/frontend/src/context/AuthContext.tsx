@@ -16,6 +16,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState<boolean>(true);
 
   const logout = useCallback(() => {
+    const tokens = getTokens();
+    if (tokens?.refresh) {
+      fetch('/api/auth/logout/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(tokens.access ? { Authorization: `Bearer ${tokens.access}` } : {}),
+        },
+        body: JSON.stringify({ refresh: tokens.refresh }),
+      }).catch(() => {});
+    }
     setTokens(null);
     setUser(null);
   }, []);
