@@ -34,6 +34,37 @@ class ThrottledTokenRefreshView(TokenRefreshView):
     throttle_classes = [RefreshThrottle]
 
 
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def health_check(request):
+    """
+    Production health check probe for Docker, Kubernetes, Nginx and load balancers.
+    Checks database read/write connectivity and Redis cache readiness.
+    """
+    health = {"status": "healthy", "database": False, "cache": False}
+    try:
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        health["database"] = True
+    except Exception as e:
+        health["database"] = False
+        health["database_error"] = str(e)
+
+    try:
+        from django.core.cache import cache
+        cache.set("_labora_health_probe", "1", 10)
+        health["cache"] = (cache.get("_labora_health_probe") == "1")
+    except Exception as e:
+        health["cache"] = False
+        health["cache_error"] = str(e)
+
+    if health["database"] and health["cache"]:
+        return Response(health, status=status.HTTP_200_OK)
+    health["status"] = "unhealthy"
+    return Response(health, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
 @api_view(["POST"])
 @permission_classes([AllowAny])
 @throttle_classes([LoginThrottle])

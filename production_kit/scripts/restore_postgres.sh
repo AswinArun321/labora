@@ -12,7 +12,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 BACKUP_FILE="$1"
-CONTAINER_NAME="labora-db"
+CONTAINER_NAME="${CONTAINER_NAME:-labora-db}"
 DB_USER="${POSTGRES_USER:-labora_admin}"
 DB_NAME="${POSTGRES_DB:-labora}"
 
@@ -40,14 +40,14 @@ if [ "${CONFIRM}" != "RESTORE" ]; then
 fi
 
 echo "[INFO] Terminating active connections to '${DB_NAME}'..."
-docker exec "${CONTAINER_NAME}" psql -U "${DB_USER}" -d postgres -c \
+docker exec -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "${CONTAINER_NAME}" psql -U "${DB_USER}" -d postgres -c \
     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" || true
 
 echo "[INFO] Dropping and recreating database '${DB_NAME}'..."
-docker exec "${CONTAINER_NAME}" psql -U "${DB_USER}" -d postgres -c "DROP DATABASE IF EXISTS ${DB_NAME};"
-docker exec "${CONTAINER_NAME}" psql -U "${DB_USER}" -d postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+docker exec -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "${CONTAINER_NAME}" psql -U "${DB_USER}" -d postgres -c "DROP DATABASE IF EXISTS ${DB_NAME};"
+docker exec -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "${CONTAINER_NAME}" psql -U "${DB_USER}" -d postgres -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
 
 echo "[INFO] Restoring database content..."
-gunzip -c "${BACKUP_FILE}" | docker exec -i "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}"
+gunzip -c "${BACKUP_FILE}" | docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "${CONTAINER_NAME}" psql -U "${DB_USER}" -d "${DB_NAME}"
 
 echo "[SUCCESS] Database restoration complete at $(date)."

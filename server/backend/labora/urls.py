@@ -16,6 +16,7 @@ router.register("users", acc.UserViewSet, basename="user")
 router.register("practicals", labs.PracticalViewSet, basename="practical")
 
 api = [
+    path("health/", acc.health_check),
     path("auth/login/", acc.login),
     path("auth/refresh/", acc.ThrottledTokenRefreshView.as_view()),
     path("auth/logout/", acc.logout),

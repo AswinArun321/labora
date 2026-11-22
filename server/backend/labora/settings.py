@@ -37,7 +37,26 @@ def env_list(name, default=""):
 
 SECRET_KEY = env("DJANGO_SECRET_KEY", "dev-only-insecure-key-change-me-in-production-0000")
 DEBUG = env_bool("DJANGO_DEBUG", True)
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
+
+# Production Security & SSL Settings
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", not DEBUG)
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", not DEBUG)
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+
+if not DEBUG or env_bool("ENABLE_HSTS", False):
+    SECURE_HSTS_SECONDS = int(env("SECURE_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", True)
+    SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", True)
+else:
+    SECURE_HSTS_SECONDS = int(env("SECURE_HSTS_SECONDS", "0"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -101,6 +120,25 @@ else:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
+
+# ---------------------------------------------------------------------------
+# Caching (Shared Redis backend for multi-worker rate limiting & anti-replay)
+# ---------------------------------------------------------------------------
+REDIS_CACHE_URL = env("REDIS_CACHE_URL", env("REDIS_URL", ""))
+if REDIS_CACHE_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_CACHE_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "labora-local-cache",
         }
     }
 

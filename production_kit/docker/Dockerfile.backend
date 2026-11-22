@@ -1,5 +1,5 @@
 # LABORA Production Backend & Celery Dockerfile
-# Based on Python 3.11 slim with full WeasyPrint PDF and Gunicorn support
+# Based on Python 3.11 slim with full WeasyPrint PDF, LibreOffice headless, and Gunicorn support
 FROM python:3.11-slim
 
 # Prevent Python from writing .pyc files and enable unbuffered logging
@@ -8,7 +8,12 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install system dependencies for PostgreSQL, WeasyPrint (Pango, Cairo, GdkPixbuf), and build tools
+# Install system dependencies:
+# - PostgreSQL client libraries
+# - WeasyPrint rendering libraries (Pango, Cairo, GdkPixbuf)
+# - LibreOffice headless for dual-engine DOCX to PDF conversion
+# - Indic and Unicode fonts for multi-language lab record printing
+# - Utility tools (curl, netcat-openbsd)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -19,6 +24,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdk-pixbuf-2.0-0 \
     shared-mime-info \
     curl \
+    netcat-openbsd \
+    libreoffice-writer \
+    default-jre-headless \
+    fonts-dejavu-core \
+    fonts-noto-core \
+    fonts-indic \
+    fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -29,6 +41,10 @@ RUN pip install --no-cache-dir -U pip setuptools wheel && \
 # Copy application source code
 COPY . /app/
 
+# Copy entrypoint script and set permissions
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh || true
+
 # Create non-privileged user and setup directories
 RUN useradd -u 1000 -m labora && \
     mkdir -p /app/media /app/staticfiles && \
@@ -38,5 +54,7 @@ USER labora
 
 EXPOSE 8000
 
-# Default command: run Gunicorn with 4 workers and gevent/sync worker type
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
+# Default command: run Gunicorn with 4 workers and sync worker type
 CMD ["gunicorn", "labora.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]

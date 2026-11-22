@@ -267,3 +267,12 @@ class SecurityHardeningTests(TestCase):
             throttled_res = self.client.post("/api/auth/login/", {"username": "bad", "password": "bad"}, format="json")
             self.assertEqual(throttled_res.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
             LoginThrottle.rate = None  # reset
+
+    def test_health_check_endpoint(self):
+        """GET /api/health/ returns HTTP 200 with database and cache status."""
+        res = self.client.get("/api/health/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        data = res.json()
+        self.assertEqual(data.get("status"), "healthy")
+        self.assertTrue(data.get("database"))
+        self.assertTrue(data.get("cache"))

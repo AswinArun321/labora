@@ -61,10 +61,13 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ChangeMeSecurePassword123}
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/0
+      - REDIS_CACHE_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/2
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/1
       - CODE_EXECUTOR=judge0
       - JUDGE0_URL=http://judge0-server:2358
+      - DOCX_PDF_CONVERTER=auto
       - LABORA_SECURE_BROWSER_KEY=${LABORA_SECURE_BROWSER_KEY:-change-this-shared-browser-key}
       - TIME_ZONE=Asia/Kolkata
     volumes:
@@ -77,6 +80,12 @@ services:
         condition: service_healthy
     networks:
       - labora-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # ---------------------------------------------------------------------------
   # 4. Celery Asynchronous Execution Dispatcher
@@ -96,13 +105,47 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ChangeMeSecurePassword123}
       - POSTGRES_HOST=db
       - POSTGRES_PORT=5432
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/0
+      - REDIS_CACHE_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/2
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/1
       - CODE_EXECUTOR=judge0
       - JUDGE0_URL=http://judge0-server:2358
+      - TIME_ZONE=Asia/Kolkata
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - labora-internal
+
+  # ---------------------------------------------------------------------------
+  # 4b. Celery Periodic Scheduler (Beat - Stale Execution Reconciler)
+  # ---------------------------------------------------------------------------
+  celery_beat:
+    build:
+      context: ../../server/backend
+      dockerfile: ../../production_kit/docker/Dockerfile.backend
+    container_name: labora-celery-beat
+    restart: always
+    command: celery -A labora beat -l info
+    environment:
+      - DJANGO_DEBUG=false
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-prod-secret-key-replace-with-random-entropy}
+      - POSTGRES_DB=${POSTGRES_DB:-labora}
+      - POSTGRES_USER=${POSTGRES_USER:-labora_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ChangeMeSecurePassword123}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/0
+      - REDIS_CACHE_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/2
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-RedisSecurePass456}@redis:6379/1
+      - TIME_ZONE=Asia/Kolkata
+    depends_on:
+      backend:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
