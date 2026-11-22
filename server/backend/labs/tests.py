@@ -1,5 +1,7 @@
 import base64
 import os
+import subprocess
+import tempfile
 import time
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -12,8 +14,19 @@ from rest_framework.test import APIClient
 
 from accounts.models import CollegeSettings, User
 from labs.models import ActivityEvent, Execution, Practical, Submission
+from labs.records import (
+    PDFConverterUnavailableError,
+    build_docx,
+    build_docx_file,
+    build_pdf_file,
+    convert_docx_to_pdf_libreoffice,
+    find_libreoffice_binary,
+    record_context,
+    sanitize_xml_text,
+)
 from labs.secure_browser import compute_signature
 from labs.tasks import dispatch_execution_task, poll_execution_task, reconcile_stale_executions
+from labs.views import StreamingRecordResponse, record_generation_lock
 
 
 
@@ -718,3 +731,176 @@ class AsyncExecutionTaskTests(TestCase):
         self.assertEqual(ex_ambig.status, "System Error")
         self.assertEqual(ex_queued.state, Execution.State.FAILED)
         self.assertEqual(ex_queued.status, "System Error")
+
+
+class RecordGenerationHardeningTests(TestCase):
+    def setUp(self):
+        call_command("seed_demo", stdout=open(os.devnull, "w"))
+        self.c = APIClient()
+        self.py = Practical.objects.get(language="python")
+        self.student = User.objects.get(username="student1")
+        self.sub, _ = Submission.objects.get_or_create(
+            practical=self.py,
+            student=self.student,
+            defaults={"code": self.py.starter_code, "status": Submission.Status.APPROVED}
+        )
+        self.sub.status = Submission.Status.APPROVED
+        self.sub.save()
+
+    def login(self, username, pw):
+        r = self.c.post("/api/auth/login/", {"username": username, "password": pw}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.c.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access"])
+
+    def test_xml_sanitization_rules(self):
+        # 1. Null bytes and control characters stripped
+        dirty = "Hello\x00\x01\x02\x08World\x0b\x0c!\x1f"
+        self.assertEqual(sanitize_xml_text(dirty), "HelloWorld!")
+
+        # 2. ANSI escape codes stripped
+        ansi = "\x1b[31mRed Text\x1b[0m and \x1b[1;34mBold Blue\x1b[0m"
+        self.assertEqual(sanitize_xml_text(ansi), "Red Text and Bold Blue")
+
+        # 3. Valid tabs, newlines, carriage returns preserved
+        formatted = "\tLine 1\r\n\tLine 2\n"
+        self.assertEqual(sanitize_xml_text(formatted), formatted)
+
+        # 4. Indian language text preserved
+        indian = "नमस्ते (Hindi) - வணக்கம் (Tamil) - నమస్కారం (Telugu) - ನಮಸ್ಕಾರ (Kannada)"
+        self.assertEqual(sanitize_xml_text(indian), indian)
+
+    def test_docx_generation_with_dirty_content_succeeds(self):
+        self.sub.code = "print('Hello\x00\x08World')\n# \x1b[32mGreen\x1b[0m"
+        self.sub.save()
+        Execution.objects.create(
+            submission=self.sub,
+            code=self.sub.code,
+            stdout="Output with \x00 null bytes and \x1b[31mred\x1b[0m ANSI",
+            stderr="Error with \x07 bell and \x0b vertical tab",
+            status="Accepted",
+            state=Execution.State.COMPLETED
+        )
+        ctx = record_context(self.student, self.py.subject, [self.sub])
+        data = build_docx(ctx)
+        self.assertTrue(data.startswith(b"PK"), "DOCX should start with zip PK header")
+
+    @patch("labs.records.find_libreoffice_binary")
+    @patch("subprocess.run")
+    def test_libreoffice_headless_conversion_success(self, mock_run, mock_find_lo):
+        mock_find_lo.return_value = "/usr/bin/soffice"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            docx_path = os.path.join(tmp_dir, "test.docx")
+            with open(docx_path, "wb") as f:
+                f.write(b"dummy docx")
+
+            def side_effect(*args, **kwargs):
+                cmd = args[0]
+                out_pdf = os.path.join(tmp_dir, "test.pdf")
+                with open(out_pdf, "wb") as f:
+                    f.write(b"%PDF-1.4 test content")
+                res = MagicMock()
+                res.returncode = 0
+                res.stdout = b""
+                res.stderr = b""
+                return res
+
+            mock_run.side_effect = side_effect
+            pdf_path = convert_docx_to_pdf_libreoffice(docx_path, tmp_dir, timeout=10)
+            self.assertTrue(os.path.isfile(pdf_path))
+            with open(pdf_path, "rb") as f:
+                self.assertTrue(f.read().startswith(b"%PDF"))
+
+            # Verify isolated profile passed
+            cmd_called = mock_run.call_args[0][0]
+            self.assertTrue(any("-env:UserInstallation=" in arg for arg in cmd_called))
+
+    @patch("labs.records.find_libreoffice_binary")
+    @patch("subprocess.run")
+    def test_libreoffice_conversion_timeout(self, mock_run, mock_find_lo):
+        mock_find_lo.return_value = "/usr/bin/soffice"
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["soffice"], timeout=5)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            docx_path = os.path.join(tmp_dir, "test.docx")
+            with open(docx_path, "wb") as f:
+                f.write(b"dummy")
+            with self.assertRaises(TimeoutError):
+                convert_docx_to_pdf_libreoffice(docx_path, tmp_dir, timeout=5)
+
+    @override_settings(DOCX_PDF_CONVERTER="libreoffice")
+    @patch("labs.records.find_libreoffice_binary", return_value=None)
+    def test_libreoffice_mode_missing_binary_raises_unavailable(self, mock_find):
+        ctx = record_context(self.student, self.py.subject, [self.sub])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaises(PDFConverterUnavailableError):
+                build_pdf_file(ctx, tmp_dir, "record")
+
+    def test_process_safe_file_lock(self):
+        lock_key = "test_record_lock"
+        with record_generation_lock(lock_key, timeout=1.0) as acquired1:
+            self.assertTrue(acquired1)
+            with self.assertRaises(TimeoutError):
+                with record_generation_lock(lock_key, timeout=0.1, poll_interval=0.05):
+                    pass
+
+    def test_streaming_record_response_and_cleanup(self):
+        tmp_dir = tempfile.mkdtemp(prefix="labora_test_stream_")
+        test_file = os.path.join(tmp_dir, "test.docx")
+        with open(test_file, "wb") as f:
+            f.write(b"Streaming content 12345")
+
+        resp = StreamingRecordResponse(test_file, cleanup_dir=tmp_dir, content_type="application/octet-stream")
+        self.assertTrue(os.path.isdir(tmp_dir))
+        self.assertTrue(os.path.isfile(test_file))
+
+        # Read streaming content
+        chunks = list(resp.streaming_content)
+        self.assertEqual(b"".join(chunks), b"Streaming content 12345")
+
+        # Close response - must trigger cleanup
+        resp.close()
+        self.assertFalse(os.path.exists(tmp_dir), "Temporary directory should be deleted on response.close()")
+
+    def test_download_endpoints_return_streaming_and_attachment(self):
+        self.login("student1", "student123")
+        Execution.objects.create(
+            submission=self.sub,
+            code="print('done')",
+            stdout="done",
+            status="Accepted",
+            state=Execution.State.COMPLETED
+        )
+
+        # Single submission record DOCX
+        r = self.c.get(f"/api/records/submission/{self.sub.id}/?type=docx")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.has_header("Content-Disposition"))
+        self.assertIn("attachment; filename=", r["Content-Disposition"])
+        self.assertTrue(r.content.startswith(b"PK"))
+
+        # Subject record DOCX
+        r_subj = self.c.get(f"/api/records/subject/{self.py.subject_id}/?type=docx")
+        self.assertEqual(r_subj.status_code, 200)
+        self.assertTrue(r_subj.content.startswith(b"PK"))
+
+    @patch("labs.records.find_libreoffice_binary")
+    @patch("subprocess.run")
+    def test_invalid_pdf_output_raises_error(self, mock_run, mock_find_lo):
+        mock_find_lo.return_value = "/usr/bin/soffice"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            docx_path = os.path.join(tmp_dir, "test.docx")
+            with open(docx_path, "wb") as f:
+                f.write(b"dummy")
+
+            # Corrupted PDF (missing %PDF header)
+            def corrupt_pdf(*args, **kwargs):
+                out_pdf = os.path.join(tmp_dir, "test.pdf")
+                with open(out_pdf, "wb") as f:
+                    f.write(b"Not a PDF header")
+                res = MagicMock()
+                res.returncode = 0
+                return res
+
+            mock_run.side_effect = corrupt_pdf
+            with self.assertRaises(ValueError) as ctx:
+                convert_docx_to_pdf_libreoffice(docx_path, tmp_dir, timeout=5)
+            self.assertIn("not a valid PDF", str(ctx.exception))

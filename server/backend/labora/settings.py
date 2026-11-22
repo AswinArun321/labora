@@ -182,6 +182,13 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 # ---------------------------------------------------------------------------
+# Document & Record Generation
+# ---------------------------------------------------------------------------
+DOCX_PDF_CONVERTER = env("DOCX_PDF_CONVERTER", "auto")  # "auto", "libreoffice", "weasyprint"
+LIBREOFFICE_PATH = env("LIBREOFFICE_PATH", "")          # Custom soffice/libreoffice path
+RECORD_GENERATION_TIMEOUT_SECONDS = int(env("RECORD_GENERATION_TIMEOUT_SECONDS", "30"))
+
+# ---------------------------------------------------------------------------
 # LABORA Secure Browser
 # ---------------------------------------------------------------------------
 # Shared key baked into the college's build of the secure browser. Requests

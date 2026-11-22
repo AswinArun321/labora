@@ -24,7 +24,7 @@
 </head>
 <body>
   <div class="center">
-    {% if logo_path %}<img class="logo" src="file://{{ logo_path }}">{% endif %}
+    {% if logo_uri %}<img class="logo" src="{{ logo_uri }}">{% elif logo_path %}<img class="logo" src="file://{{ logo_path }}">{% endif %}
     <div class="college">{{ college.college_name }}</div>
     {% if college.college_address %}<div>{{ college.college_address }}</div>{% endif %}
     <div class="title">{{ college.record_title }}</div>
