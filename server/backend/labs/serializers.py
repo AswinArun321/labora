@@ -9,9 +9,11 @@ class PracticalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Practical
-        fields = ["id", "subject", "subject_name", "subject_code", "experiment_no", "title", "aim", "question",
-                  "language", "starter_code", "sample_input", "restricted", "require_secure_browser",
-                  "is_published", "due_date", "created_at"]
+        fields = [
+            "id", "subject", "subject_name", "subject_code", "experiment_no", "title",
+            "aim", "question", "language", "starter_code", "sample_input", "restricted",
+            "require_secure_browser", "is_published", "due_date", "created_at",
+        ]
         read_only_fields = ["created_at"]
 
 
@@ -33,8 +35,7 @@ class ExecutionSerializer(serializers.ModelSerializer):
         model = Execution
         fields = [
             "id", "stdin", "stdout", "stderr", "compile_output", "status", "state",
-            "is_complete", "time", "memory", "judge0_token", "last_error",
-            "started_at", "completed_at", "created_at"
+            "is_complete", "time", "memory", "started_at", "completed_at", "created_at",
         ]
 
 
@@ -49,7 +50,10 @@ class EventSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ActivityEvent
-        fields = ["id", "kind", "kind_label", "chars", "detail", "client_time", "created_at", "secure_browser"]
+        fields = [
+            "id", "kind", "kind_label", "chars", "detail", "client_time",
+            "created_at", "secure_browser",
+        ]
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -59,8 +63,11 @@ class SubmissionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Submission
-        fields = ["id", "practical", "student", "student_name", "roll_no", "code", "status", "locked", "result",
-                  "teacher_note", "started_at", "updated_at", "submitted_at", "approved_at", "record_execution"]
+        fields = [
+            "id", "practical", "student", "student_name", "roll_no", "code", "status",
+            "locked", "result", "teacher_note", "started_at", "updated_at",
+            "submitted_at", "approved_at", "record_execution",
+        ]
 
     def get_student_name(self, obj):
         return obj.student.get_full_name() or obj.student.username
