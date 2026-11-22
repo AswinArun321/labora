@@ -89,8 +89,8 @@ class StudentUser(HttpUser):
             for _ in range(10):
                 time.sleep(1.5)
                 poll = self.client.get(
-                    f"/api/workspace/{self.practical_id}/executions/{exec_id}/",
-                    name="/api/workspace/[id]/executions/[id]/"
+                    f"/api/executions/{exec_id}/",
+                    name="/api/executions/[id]/"
                 )
                 if poll.status_code == 200 and poll.json().get("is_complete"):
                     break

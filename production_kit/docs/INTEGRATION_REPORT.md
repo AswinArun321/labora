@@ -39,7 +39,7 @@
   ```
 
 ### 2.2. Poll Execution Status & Output
-* **Endpoint:** `GET /api/executions/<execution_id>/`
+* **Endpoint:** `GET /api/executions/<execution_id>/` (and alias `/api/workspace/<practical_id>/executions/<execution_id>/`)
 * **Permission:** `IsAuthenticated` (Student owner or assigned teacher/admin)
 * **Response while processing:**
   ```json
@@ -69,6 +69,21 @@
     "memory": 8420
   }
   ```
+
+---
+
+## 3. React Frontend Integration
+
+* **Non-Blocking UI Flow:** In `server/frontend/dist/assets/index-DRq-BgX-.js`:
+  1. Student clicks **Run**. The button immediately toggles to `Running…` (`disabled: true`), preventing accidental multi-click race conditions.
+  2. Any pending editor telemetry batches are flushed (`await ae()`).
+  3. Client dispatches `POST /api/workspace/<id>/run-async/`.
+  4. On HTTP 202 receipt, the UI displays an amber `Queued` badge and renders `[LABORA] Code queued in Celery worker... Waiting for sandbox runner...` in Monaco's output panel.
+  5. The client initiates non-blocking polling to `GET /api/executions/<id>/` every 1,000ms.
+  6. As the runner transitions through `DISPATCHING`, `SUBMITTED_TO_RUNNER`, and `PROCESSING`, the badge dynamically reflects intermediate states.
+  7. Upon terminal resolution (`is_complete=True`), the Monaco panel renders stdout, stderr, compile errors, runtime, and memory metrics with an emerald `Accepted` badge (or rose error badge).
+  8. Polling includes network-retry resilience against intermittent packet loss.
+  9. A fallback to synchronous `/run/` is retained for graceful degradation.
 
 ---
 

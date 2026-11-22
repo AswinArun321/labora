@@ -51,3 +51,4 @@ React Polling / Client Update (Displays final output in Monaco)
 | `server/backend/labs/tests.py` | Modified | Fixed Windows `/dev/null` defect; added async execution and permission isolation tests. |
 | `server/backend/requirements.txt` | Modified | Added `celery>=5.3`, `redis>=5.0`, `packaging>=23`. |
 | `server/backend/requirements-test.txt` | Modified | Added `celery>=5.3`, `redis>=5.0`, `packaging>=23`. |
+| `server/frontend/dist/assets/index-DRq-BgX-.js` | Modified | Updated React workspace execution handler to call `POST /run-async/`, show queued/processing badges in Monaco, poll `GET /executions/<id>/` with network retry tolerance, and fallback gracefully. |

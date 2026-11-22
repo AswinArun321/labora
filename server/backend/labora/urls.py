@@ -27,6 +27,7 @@ api = [
     path("workspace/<int:practical_id>/run-async/", labs.workspace_run_async),
     path("workspace/<int:practical_id>/events/", labs.workspace_events),
     path("workspace/<int:practical_id>/submit/", labs.workspace_submit),
+    path("workspace/<int:practical_id>/executions/<int:pk>/", labs.execution_detail),
     path("executions/<int:pk>/", labs.execution_detail),
     path("submissions/<int:pk>/", labs.submission_detail),
     path("submissions/<int:pk>/approve/", labs.submission_approve),
