@@ -27,9 +27,15 @@ class StudentPracticalSerializer(PracticalSerializer):
 
 
 class ExecutionSerializer(serializers.ModelSerializer):
+    is_complete = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = Execution
-        fields = ["id", "stdin", "stdout", "stderr", "compile_output", "status", "time", "memory", "created_at"]
+        fields = [
+            "id", "stdin", "stdout", "stderr", "compile_output", "status", "state",
+            "is_complete", "time", "memory", "judge0_token", "last_error",
+            "started_at", "completed_at", "created_at"
+        ]
 
 
 class VersionSerializer(serializers.ModelSerializer):

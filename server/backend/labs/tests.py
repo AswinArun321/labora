@@ -1,3 +1,4 @@
+import os
 import time
 
 from django.core.management import call_command
@@ -5,7 +6,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from accounts.models import CollegeSettings, User
-from labs.models import Practical, Submission
+from labs.models import Execution, Practical, Submission
 from labs.secure_browser import compute_signature
 
 KEY = "test-key"
@@ -24,10 +25,10 @@ JAVA_FACT = (
 )
 
 
-@override_settings(CODE_EXECUTOR="local", SECURE_BROWSER_KEY=KEY)
+@override_settings(CODE_EXECUTOR="local", SECURE_BROWSER_KEY=KEY, CELERY_TASK_ALWAYS_EAGER=True)
 class LaboraFlowTests(TestCase):
     def setUp(self):
-        call_command("seed_demo", stdout=open("/dev/null", "w"))
+        call_command("seed_demo", stdout=open(os.devnull, "w"))
         self.c = APIClient()
         self.py = Practical.objects.get(language="python")
         self.cprog = Practical.objects.get(language="c")
@@ -154,3 +155,45 @@ class LaboraFlowTests(TestCase):
         User.objects.create_user("outsider", password="pw12345", role="student")
         self.login("outsider", "pw12345")
         self.assertEqual(self.c.get(f"/api/workspace/{self.py.id}/").status_code, 403)
+
+    def test_async_execution_flow(self):
+        self.login("student1", "student123")
+        base = f"/api/workspace/{self.py.id}/"
+        # 1. Trigger async execution
+        r = self.c.post(base + "run-async/", {"code": PY_PRIME, "stdin": "7\n"}, format="json")
+        self.assertEqual(r.status_code, 202, r.content)
+        exec_id = r.json()["execution_id"]
+        self.assertIn("poll_url", r.json())
+
+        # 2. Check execution detail endpoint
+        r_poll = self.c.get(f"/api/executions/{exec_id}/")
+        self.assertEqual(r_poll.status_code, 200)
+        data = r_poll.json()
+        self.assertEqual(data["status"], "Accepted")
+        self.assertEqual(data["state"], "COMPLETED")
+        self.assertTrue(data["is_complete"])
+        self.assertIn("Prime", data["stdout"])
+
+        # 3. Isolation: student2 cannot access student1's execution
+        self.login("student2", "student123")
+        r_forbidden = self.c.get(f"/api/executions/{exec_id}/")
+        self.assertEqual(r_forbidden.status_code, 403)
+
+        # 4. Teacher CAN access student1's execution
+        self.login("teacher", "teacher123")
+        r_teacher = self.c.get(f"/api/executions/{exec_id}/")
+        self.assertEqual(r_teacher.status_code, 200)
+
+    def test_cannot_submit_while_execution_pending(self):
+        self.login("student1", "student123")
+        base = f"/api/workspace/{self.py.id}/"
+        st = User.objects.get(username="student1")
+        sub, _ = Submission.objects.get_or_create(practical=self.py, student=st, defaults={"code": self.py.starter_code})
+        # Create a pending execution manually
+        Execution.objects.create(
+            submission=sub, code=PY_PRIME, stdin="7\n",
+            state=Execution.State.PROCESSING, status="In Queue"
+        )
+        r = self.c.post(base + "submit/", {"code": PY_PRIME}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["code"], "run_required")

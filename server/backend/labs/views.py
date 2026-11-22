@@ -211,9 +211,58 @@ def workspace_run(request, practical_id):
         return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     ex = Execution.objects.create(submission=sub, code=code, stdin=stdin, stdout=res.stdout[:50_000],
                                   stderr=res.stderr[:20_000], compile_output=res.compile_output[:20_000],
-                                  status=res.status, time=res.time, memory=res.memory)
+                                  status=res.status, state=Execution.State.COMPLETED,
+                                  completed_at=timezone.now(), time=res.time, memory=res.memory)
     ActivityEvent.objects.create(submission=sub, kind=ActivityEvent.Kind.RUN, detail={"status": res.status},
                                  secure_browser=is_secure_browser_request(request))
+    return Response(ExecutionSerializer(ex).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsStudent])
+@throttle_classes([RunThrottle])
+def workspace_run_async(request, practical_id):
+    """Asynchronous code execution endpoint. Returns HTTP 202 with execution_id."""
+    p = get_student_practical(request, practical_id)
+    sub = get_submission(request, p)
+    ensure_editable(sub)
+    code = clean_code(request.data)
+    stdin = clean_code(request.data, "stdin", MAX_STDIN_CHARS)
+    sub.code = code
+    sub.save(update_fields=["code", "updated_at"])
+    add_version(sub, code, CodeVersion.Reason.RUN)
+
+    ex = Execution.objects.create(
+        submission=sub,
+        code=code,
+        stdin=stdin,
+        state=Execution.State.QUEUED,
+        status="In Queue"
+    )
+    from .tasks import dispatch_execution_task
+    dispatch_execution_task.delay(ex.id)
+
+    return Response({
+        "execution_id": ex.id,
+        "state": ex.state,
+        "status": ex.status,
+        "created_at": ex.created_at,
+        "poll_url": f"/api/executions/{ex.id}/"
+    }, status=status.HTTP_202_ACCEPTED)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def execution_detail(request, pk):
+    """Retrieve execution status and outputs. Enforces student and teacher isolation."""
+    ex = get_object_or_404(Execution.objects.select_related("submission__practical__subject", "submission__student"), pk=pk)
+    u = request.user
+    if u.is_student:
+        if ex.submission.student_id != u.id:
+            raise PermissionDenied("You can only view your own executions.")
+    else:
+        if not teacher_can_access_subject(u, ex.submission.practical.subject):
+            raise PermissionDenied("You do not teach this subject.")
     return Response(ExecutionSerializer(ex).data)
 
 
@@ -258,7 +307,7 @@ def workspace_submit(request, practical_id):
     sub = get_submission(request, p)
     ensure_editable(sub)
     code = clean_code(request.data)
-    last_ok = sub.executions.filter(status="Accepted").order_by("-created_at").first()
+    last_ok = sub.executions.filter(status="Accepted", state=Execution.State.COMPLETED).order_by("-created_at").first()
     if not last_ok or last_ok.code != code:
         return Response({"detail": "Run your final program successfully before submitting, so the record "
                                    "contains its real output.", "code": "run_required"}, status=400)

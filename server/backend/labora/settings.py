@@ -161,6 +161,17 @@ JUDGE0_LANGUAGE_IDS = {
 EXECUTION_TIMEOUT_SECONDS = float(env("EXECUTION_TIMEOUT_SECONDS", "5"))
 
 # ---------------------------------------------------------------------------
+# Celery & Task Broker
+# ---------------------------------------------------------------------------
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", env("REDIS_URL", "redis://localhost:6379/0"))
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", env("REDIS_URL", "redis://localhost:6379/1"))
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", False)
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = int(env("CELERY_TASK_TIME_LIMIT", "120"))
+CELERY_TASK_SOFT_TIME_LIMIT = int(env("CELERY_TASK_SOFT_TIME_LIMIT", "90"))
+CELERY_TIMEZONE = TIME_ZONE
+
+# ---------------------------------------------------------------------------
 # LABORA Secure Browser
 # ---------------------------------------------------------------------------
 # Shared key baked into the college's build of the secure browser. Requests

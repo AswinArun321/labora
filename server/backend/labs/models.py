@@ -113,16 +113,33 @@ class ActivityEvent(models.Model):
 
 
 class Execution(models.Model):
+    class State(models.TextChoices):
+        QUEUED = "QUEUED", "Queued"
+        DISPATCHING = "DISPATCHING", "Dispatching"
+        SUBMITTED_TO_RUNNER = "SUBMITTED_TO_RUNNER", "Submitted to runner"
+        PROCESSING = "PROCESSING", "Processing"
+        COMPLETED = "COMPLETED", "Completed"
+        FAILED = "FAILED", "Failed"
+        TIMED_OUT = "TIMED_OUT", "Timed out"
+        CANCELLED = "CANCELLED", "Cancelled"
+
     submission = models.ForeignKey(Submission, on_delete=models.CASCADE, related_name="executions")
     code = models.TextField()
     stdin = models.TextField(blank=True)
     stdout = models.TextField(blank=True)
     stderr = models.TextField(blank=True)
     compile_output = models.TextField(blank=True)
-    status = models.CharField(max_length=60)
+    state = models.CharField(max_length=30, choices=State.choices, default=State.QUEUED, db_index=True)
+    status = models.CharField(max_length=60, default="In Queue")
     time = models.CharField(max_length=20, blank=True)
     memory = models.IntegerField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    judge0_token = models.CharField(max_length=64, blank=True, null=True, db_index=True)
+    runner_url = models.CharField(max_length=200, blank=True)
+    last_error = models.TextField(blank=True)
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         ordering = ["created_at"]
@@ -130,3 +147,7 @@ class Execution(models.Model):
     @property
     def succeeded(self):
         return self.status == "Accepted"
+
+    @property
+    def is_complete(self):
+        return self.state in (self.State.COMPLETED, self.State.FAILED, self.State.TIMED_OUT, self.State.CANCELLED)
