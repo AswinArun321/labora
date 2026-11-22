@@ -1,0 +1,5 @@
+﻿.venv/
+__pycache__/
+*.pyc
+server/backend/db.sqlite3
+server/backend/.seeded

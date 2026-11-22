@@ -1,0 +1,39 @@
+LABORA - Windows test kit
+=========================
+
+You need: Python 3.10+ (https://www.python.org/downloads/ - tick "Add python.exe to PATH").
+Nothing else is needed for Python practicals.
+
+1. Double-click  "1 - START SERVER.bat"
+   First run installs packages (about a minute). Leave the black window open.
+   A browser tab opens at http://127.0.0.1:8000
+
+2. Double-click  "2 - START SECURE BROWSER.bat"
+   Opens the LABORA Secure Browser in fullscreen kiosk mode.
+   To leave it: the "Exit" button (on the login page or top-right after signing in).
+   For a normal resizable window, use "3 - SECURE BROWSER (windowed test mode).bat".
+
+   Windows may show "Windows protected your PC" because the app isn't code-signed yet:
+   click "More info" -> "Run anyway".
+
+Logins
+   admin / admin123        teacher / teacher123        student1 ... student4 / student123
+
+Things to try
+   * Sign in as student1 in Chrome/Edge: Experiment 3 (Python) opens, Experiment 1 (C)
+     says it can only be opened in the LABORA Secure Browser.
+   * Copy some text from Notepad and paste into the editor -> blocked.
+     Copy a line inside the editor and paste it -> allowed.
+   * In the Secure Browser try Alt+F4, Ctrl+W, F5, or opening another site -> nothing happens.
+     Programs like other browsers / VS Code / ChatGPT running in the background are
+     reported to the teacher's timeline.
+   * Run the program, Submit, then sign in as teacher -> Subjects -> Submissions -> Review
+     -> Approve. Sign in as the student again -> Lab Records -> download.
+
+Notes for this local test
+   * Code runs on this PC (test mode). Python works out of the box.
+     C needs gcc (e.g. MSYS2/MinGW) and Java needs a JDK (javac) on PATH, otherwise you get
+     a clear "not installed" message. In real use the college runs Judge0 instead.
+   * Lab record: DOCX works. PDF needs the GTK runtime on Windows (WeasyPrint); on the
+     college Linux server PDF works normally.
+   * "RESET DEMO DATA.bat" wipes everything back to the demo state.

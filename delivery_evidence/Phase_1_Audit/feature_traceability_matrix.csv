@@ -1,0 +1,23 @@
+Requirement,Feature Name,Source File,Target Function/Class,Lines,Current Implementation State,First-Release Action
+REQ-01,Student/Teacher/Admin Accounts,server/backend/accounts/models.py,User,16-43,Implemented,Retain as-is
+REQ-02,Department & Subject Management,server/backend/accounts/models.py,Department/Subject,5-63,Implemented,Retain as-is
+REQ-03,College Branding Settings,server/backend/accounts/models.py,CollegeSettings,64-91,Implemented,Retain as-is
+REQ-04,JWT Authentication & Refresh,server/backend/accounts/views.py,login/me,26-45,Implemented,Retain as-is
+REQ-05,CSV User Import,server/backend/accounts/views.py,import_csv,98-127,Implemented,Retain as-is
+REQ-06,Monaco Editor Web Client,server/frontend/dist/assets/,index-DRq-BgX-.js,Bundled,Implemented (Pre-built),Retain as-is
+REQ-07,Python Execution Support,server/backend/labs/executor.py,run_code,87-90,Implemented (Synchronous),Rebuild (Make Asynchronous)
+REQ-08,C Execution Support,server/backend/labs/executor.py,run_code,91-101,Implemented (Synchronous),Rebuild (Make Asynchronous)
+REQ-09,Java Execution Support,server/backend/labs/executor.py,run_code,102-111,Implemented (Synchronous),Rebuild (Make Asynchronous)
+REQ-10,Secure Browser Enforcement,server/backend/labs/secure_browser.py,is_secure_browser_request,26-38,Implemented (HMAC-SHA256),Retain with changes
+REQ-11,Kiosk Lockdown Client,Secure Browser/resources/app/main.js,createWindow,117-182,Implemented (Electron 34),Retain with changes
+REQ-12,Activity Telemetry Logging,server/backend/labs/models.py,ActivityEvent,88-114,Implemented,Retain as-is
+REQ-13,Autosave & Version History,server/backend/labs/views.py,workspace_save,184-194,Implemented,Retain as-is
+REQ-14,Teacher Review Dashboard,server/backend/labs/views.py,submissions,136-156,Implemented,Retain as-is
+REQ-15,Heuristic Integrity Indicators,server/backend/labs/indicators.py,compute_indicators,23-66,Implemented,Retain as-is
+REQ-16,Teacher Approval & Correction,server/backend/labs/views.py,submission_approve,301-331,Implemented,Retain as-is
+REQ-17,DOCX Lab Record Generation,server/backend/labs/records.py,build_docx,69-144,Implemented,Retain as-is
+REQ-18,PDF Lab Record Generation,server/backend/labs/records.py,build_pdf,146-150,Implemented (WeasyPrint),Retain as-is
+REQ-19,Asynchronous Code Execution,server/backend/labs/executor.py,run_judge0,46-75,NOT Implemented (Sync only),Rebuild (Celery + Redis)
+REQ-20,Intermediate Execution States,server/backend/labs/models.py,Execution,115-132,NOT Implemented (Post-run only),Rebuild (Queued/Processing)
+REQ-21,AI-Assisted Teacher Review,server/backend/labs/ai_review.py,summarize_submission,19-42,Implemented (Optional API),Remove from first release
+REQ-22,Zero-Cost Production Stack,production_kit/docker/,docker-compose.prod.yml,Complete,Implemented in production kit,Deploy in Staging
