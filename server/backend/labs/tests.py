@@ -1,22 +1,19 @@
+import base64
 import os
-
 import time
+from datetime import timedelta
+from unittest.mock import MagicMock, patch
 
-
-
+import requests
 from django.core.management import call_command
-
 from django.test import TestCase, override_settings
-
+from django.utils import timezone
 from rest_framework.test import APIClient
 
-
-
 from accounts.models import CollegeSettings, User
-
-from labs.models import Execution, Practical, Submission
-
+from labs.models import ActivityEvent, Execution, Practical, Submission
 from labs.secure_browser import compute_signature
+from labs.tasks import dispatch_execution_task, poll_execution_task, reconcile_stale_executions
 
 
 
@@ -438,3 +435,286 @@ class LaboraFlowTests(TestCase):
         self.assertEqual(r.status_code, 400)
 
         self.assertEqual(r.json()["code"], "run_required")
+
+
+class AsyncExecutionTaskTests(TestCase):
+    def setUp(self):
+        call_command("seed_demo", stdout=open(os.devnull, "w"))
+        self.c = APIClient()
+        self.py = Practical.objects.get(language="python")
+        self.student = User.objects.get(username="student1")
+        self.sub, _ = Submission.objects.get_or_create(
+            practical=self.py,
+            student=self.student,
+            defaults={"code": self.py.starter_code}
+        )
+
+    def login(self, username, pw):
+        r = self.c.post("/api/auth/login/", {"username": username, "password": pw}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.c.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["access"])
+
+    @override_settings(CODE_EXECUTOR="judge0", EXECUTION_POLL_INITIAL_INTERVAL_SECONDS=0.5)
+    @patch("labs.tasks.poll_execution_task.apply_async")
+    @patch("requests.post")
+    def test_judge0_dispatch_success_schedules_poll(self, mock_post, mock_apply_async):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 201
+        mock_resp.json.return_value = {"token": "token-test-123"}
+        mock_post.return_value = mock_resp
+
+        ex = Execution.objects.create(
+            submission=self.sub,
+            code="print('Hello Async')",
+            stdin="",
+            state=Execution.State.QUEUED,
+            status="In Queue"
+        )
+
+        res = dispatch_execution_task(ex.id)
+        self.assertTrue(res)
+
+        ex.refresh_from_db()
+        self.assertEqual(ex.state, Execution.State.PROCESSING)
+        self.assertEqual(ex.judge0_token, "token-test-123")
+        self.assertEqual(ex.status, "In Queue")
+
+        # Verify requests.post was called with wait=false
+        mock_post.assert_called_once()
+        args, kwargs = mock_post.call_args
+        self.assertIn("wait=false", args[0])
+
+        # Verify poll task was scheduled with countdown
+        mock_apply_async.assert_called_once_with(args=[ex.id, 0.5], countdown=0.5)
+
+    @override_settings(CODE_EXECUTOR="judge0")
+    @patch("requests.post")
+    def test_judge0_dispatch_ambiguous_timeout(self, mock_post):
+        mock_post.side_effect = requests.exceptions.Timeout("Read timeout on POST")
+
+        ex = Execution.objects.create(
+            submission=self.sub,
+            code="print('Ambiguous')",
+            stdin="",
+            state=Execution.State.QUEUED,
+            status="In Queue"
+        )
+
+        res = dispatch_execution_task(ex.id)
+        self.assertFalse(res)
+
+        ex.refresh_from_db()
+        self.assertEqual(ex.state, Execution.State.SUBMITTED_TO_RUNNER)
+        self.assertEqual(ex.retry_count, 1)
+        self.assertIn("Ambiguous dispatch timeout", ex.last_error)
+
+        # Subsequent call does NOT re-dispatch (avoids duplicate execution)
+        mock_post.reset_mock()
+        res2 = dispatch_execution_task(ex.id)
+        self.assertFalse(res2)
+        mock_post.assert_not_called()
+
+    def test_duplicate_task_delivery_guard(self):
+        ex = Execution.objects.create(
+            submission=self.sub,
+            code="print('Done')",
+            stdin="",
+            state=Execution.State.COMPLETED,
+            status="Accepted"
+        )
+        with patch("requests.post") as mock_post:
+            res = dispatch_execution_task(ex.id)
+            self.assertTrue(res)
+            mock_post.assert_not_called()
+
+        with patch("requests.get") as mock_get:
+            res_poll = poll_execution_task(ex.id)
+            self.assertTrue(res_poll)
+            mock_get.assert_not_called()
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("labs.tasks.poll_execution_task.apply_async")
+    @patch("requests.get")
+    def test_poll_task_pending_status_reschedules(self, mock_get, mock_apply_async):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "status": {"id": 2, "description": "Processing"}
+        }
+        mock_get.return_value = mock_resp
+
+        ex = Execution.objects.create(
+            submission=self.sub,
+            code="print('Waiting')",
+            stdin="",
+            state=Execution.State.PROCESSING,
+            status="In Queue",
+            judge0_token="token-abc"
+        )
+
+        res = poll_execution_task(ex.id, current_interval=0.5)
+        self.assertIsNone(res)
+
+        ex.refresh_from_db()
+        self.assertEqual(ex.status, "Processing")
+        self.assertEqual(ex.state, Execution.State.PROCESSING)
+
+        # Backoff: 0.5 * 1.25 = 0.625
+        mock_apply_async.assert_called_once_with(args=[ex.id, 0.625], countdown=0.625)
+
+    @patch("requests.get")
+    def test_poll_task_terminal_accepted_finalizes_execution(self, mock_get):
+        stdout_b64 = base64.b64encode(b"Output Hello\n").decode()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "status": {"id": 3, "description": "Accepted"},
+            "stdout": stdout_b64,
+            "stderr": None,
+            "compile_output": None,
+            "time": "0.045",
+            "memory": 2048
+        }
+        mock_get.return_value = mock_resp
+
+        ex = Execution.objects.create(
+            submission=self.sub,
+            code="print('Output Hello')",
+            stdin="",
+            state=Execution.State.PROCESSING,
+            status="Processing",
+            judge0_token="token-abc"
+        )
+
+        res = poll_execution_task(ex.id)
+        self.assertTrue(res)
+
+        ex.refresh_from_db()
+        self.assertEqual(ex.state, Execution.State.COMPLETED)
+        self.assertEqual(ex.status, "Accepted")
+        self.assertEqual(ex.stdout, "Output Hello\n")
+        self.assertEqual(ex.time, "0.045")
+        self.assertEqual(ex.memory, 2048)
+        self.assertIsNotNone(ex.completed_at)
+
+        # Activity event created
+        event = ActivityEvent.objects.filter(submission=self.sub, kind=ActivityEvent.Kind.RUN).latest("created_at")
+        self.assertEqual(event.detail.get("status"), "Accepted")
+        self.assertEqual(event.detail.get("time"), "0.045")
+
+    @override_settings(EXECUTION_POLL_TIMEOUT_SECONDS=30)
+    @patch("requests.get")
+    def test_poll_task_deadline_timeout(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "status": {"id": 1, "description": "In Queue"}
+        }
+        mock_get.return_value = mock_resp
+
+        ex = Execution.objects.create(
+            submission=self.sub,
+            code="while True: pass",
+            stdin="",
+            state=Execution.State.PROCESSING,
+            status="In Queue",
+            judge0_token="token-abc",
+            started_at=timezone.now() - timedelta(seconds=35)
+        )
+
+        res = poll_execution_task(ex.id)
+        self.assertFalse(res)
+
+        ex.refresh_from_db()
+        self.assertEqual(ex.state, Execution.State.TIMED_OUT)
+        self.assertEqual(ex.status, "Time Limit Exceeded")
+        self.assertIn("timed out waiting for sandbox worker", ex.stderr)
+        self.assertIsNotNone(ex.completed_at)
+
+    @patch("requests.get")
+    def test_poll_task_runner_404_fails_cleanly(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_get.return_value = mock_resp
+
+        ex = Execution.objects.create(
+            submission=self.sub,
+            code="print('Lost')",
+            stdin="",
+            state=Execution.State.PROCESSING,
+            status="In Queue",
+            judge0_token="missing-token"
+        )
+
+        res = poll_execution_task(ex.id)
+        self.assertFalse(res)
+
+        ex.refresh_from_db()
+        self.assertEqual(ex.state, Execution.State.FAILED)
+        self.assertEqual(ex.status, "System Error")
+        self.assertIn("not found on runner", ex.last_error)
+
+    def test_workspace_run_async_broker_enqueue_failure(self):
+        self.login("student1", "student123")
+        base = f"/api/workspace/{self.py.id}/"
+
+        with patch("labs.tasks.dispatch_execution_task.delay", side_effect=Exception("Redis connection refused")):
+            r = self.c.post(base + "run-async/", {"code": "print('Test')", "stdin": ""}, format="json")
+
+        self.assertEqual(r.status_code, 503)
+        self.assertEqual(r.json()["code"], "queue_unavailable")
+        self.assertNotIn("Redis connection refused", r.json()["detail"])
+
+        # Confirm no orphaned QUEUED execution exists
+        failed_ex = Execution.objects.filter(submission=self.sub, state=Execution.State.FAILED).latest("created_at")
+        self.assertEqual(failed_ex.status, "System Error")
+        self.assertIn("broker unavailable", failed_ex.last_error)
+
+    @patch("labs.tasks.poll_execution_task.delay")
+    def test_reconcile_stale_executions_task(self, mock_poll_delay):
+        old_time = timezone.now() - timedelta(seconds=250)
+
+        # 1. PROCESSING with token -> should resume poll
+        ex_proc = Execution.objects.create(
+            submission=self.sub, code="c1", state=Execution.State.PROCESSING,
+            judge0_token="tok1", status="Processing"
+        )
+        Execution.objects.filter(id=ex_proc.id).update(created_at=old_time)
+
+        # 2. SUBMITTED_TO_RUNNER with token -> should move to PROCESSING & resume poll
+        ex_sub = Execution.objects.create(
+            submission=self.sub, code="c2", state=Execution.State.SUBMITTED_TO_RUNNER,
+            judge0_token="tok2", status="In Queue"
+        )
+        Execution.objects.filter(id=ex_sub.id).update(created_at=old_time)
+
+        # 3. SUBMITTED_TO_RUNNER without token -> should fail
+        ex_ambig = Execution.objects.create(
+            submission=self.sub, code="c3", state=Execution.State.SUBMITTED_TO_RUNNER,
+            judge0_token="", status="In Queue"
+        )
+        Execution.objects.filter(id=ex_ambig.id).update(created_at=old_time)
+
+        # 4. QUEUED without token -> should fail
+        ex_queued = Execution.objects.create(
+            submission=self.sub, code="c4", state=Execution.State.QUEUED,
+            judge0_token="", status="In Queue"
+        )
+        Execution.objects.filter(id=ex_queued.id).update(created_at=old_time)
+
+        report = reconcile_stale_executions(stale_threshold_seconds=180)
+        self.assertEqual(report["reconciled"], 4)
+        self.assertEqual(report["resumed"], 2)
+        self.assertEqual(report["failed"], 2)
+
+        ex_proc.refresh_from_db()
+        ex_sub.refresh_from_db()
+        ex_ambig.refresh_from_db()
+        ex_queued.refresh_from_db()
+
+        self.assertEqual(ex_proc.state, Execution.State.PROCESSING)
+        self.assertEqual(ex_sub.state, Execution.State.PROCESSING)
+        self.assertEqual(ex_ambig.state, Execution.State.FAILED)
+        self.assertEqual(ex_ambig.status, "System Error")
+        self.assertEqual(ex_queued.state, Execution.State.FAILED)
+        self.assertEqual(ex_queued.status, "System Error")

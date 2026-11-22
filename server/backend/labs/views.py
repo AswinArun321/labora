@@ -1,27 +1,19 @@
+import logging
 from datetime import datetime, timedelta
-
-
 
 from django.db import transaction
 from django.db.models import Count
-
 from django.http import HttpResponse
-
 from django.shortcuts import get_object_or_404
-
 from django.utils import timezone
-
 from rest_framework import status, viewsets
-
 from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
-
 from rest_framework.exceptions import PermissionDenied, ValidationError
-
 from rest_framework.permissions import IsAuthenticated
-
 from rest_framework.response import Response
-
 from rest_framework.throttling import UserRateThrottle
+
+logger = logging.getLogger("labora.labs")
 
 
 
@@ -468,37 +460,33 @@ def workspace_run_async(request, practical_id):
 
 
     ex = Execution.objects.create(
-
         submission=sub,
-
         code=code,
-
         stdin=stdin,
-
         state=Execution.State.QUEUED,
-
         status="In Queue"
-
     )
-
     from .tasks import dispatch_execution_task
-
-    dispatch_execution_task.delay(ex.id)
-
-
+    try:
+        dispatch_execution_task.delay(ex.id)
+    except Exception as exc:
+        logger.exception(f"[Execution {ex.id}] Failed to enqueue execution task: {exc}")
+        ex.state = Execution.State.FAILED
+        ex.status = "System Error"
+        ex.last_error = "Execution queue broker unavailable"
+        ex.completed_at = timezone.now()
+        ex.save(update_fields=["state", "status", "last_error", "completed_at"])
+        return Response({
+            "detail": "Execution queue is temporarily unavailable. Please try again shortly.",
+            "code": "queue_unavailable"
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     return Response({
-
         "execution_id": ex.id,
-
         "state": ex.state,
-
         "status": ex.status,
-
         "created_at": ex.created_at,
-
         "poll_url": f"/api/executions/{ex.id}/"
-
     }, status=status.HTTP_202_ACCEPTED)
 
 

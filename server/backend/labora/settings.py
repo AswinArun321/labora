@@ -159,6 +159,10 @@ JUDGE0_LANGUAGE_IDS = {
     "python": int(env("JUDGE0_LANG_PYTHON", "71")),  # Python (3.8.1)
 }
 EXECUTION_TIMEOUT_SECONDS = float(env("EXECUTION_TIMEOUT_SECONDS", "5"))
+EXECUTION_POLL_TIMEOUT_SECONDS = int(env("EXECUTION_POLL_TIMEOUT_SECONDS", "30"))
+EXECUTION_POLL_INITIAL_INTERVAL_SECONDS = float(env("EXECUTION_POLL_INITIAL_INTERVAL_SECONDS", "0.5"))
+EXECUTION_POLL_MAX_INTERVAL_SECONDS = float(env("EXECUTION_POLL_MAX_INTERVAL_SECONDS", "2.0"))
+JUDGE0_DISPATCH_TIMEOUT_SECONDS = float(env("JUDGE0_DISPATCH_TIMEOUT_SECONDS", "10.0"))
 
 # ---------------------------------------------------------------------------
 # Celery & Task Broker
@@ -170,6 +174,12 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = int(env("CELERY_TASK_TIME_LIMIT", "120"))
 CELERY_TASK_SOFT_TIME_LIMIT = int(env("CELERY_TASK_SOFT_TIME_LIMIT", "90"))
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "reconcile-stale-executions": {
+        "task": "labs.tasks.reconcile_stale_executions",
+        "schedule": 60.0,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # LABORA Secure Browser
