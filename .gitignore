@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 server/backend/db.sqlite3
 server/backend/.seeded
+
+# Large executable files
+Secure Browser/LABORA Secure Browser.exe
