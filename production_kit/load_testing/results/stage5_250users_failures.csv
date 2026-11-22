@@ -1,0 +1,12 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/api/workspace/[id]/save/,HTTPError('500 Server Error: Internal Server Error for url: /api/workspace/[id]/save/'),26,2026-11-22T12:54:05Z,2026-11-22T12:54:12Z
+POST,/api/workspace/[id]/run-async/,HTTPError('500 Server Error: Internal Server Error for url: /api/workspace/[id]/run-async/'),9,2026-11-22T12:54:06Z,2026-11-22T12:54:13Z
+GET,/api/auth/me/,HTTPError('500 Server Error: Internal Server Error for url: /api/auth/me/'),19,2026-11-22T12:54:06Z,2026-11-22T12:54:10Z
+POST,/api/auth/login/,HTTPError('500 Server Error: Internal Server Error for url: /api/auth/login/'),38,2026-11-22T12:54:06Z,2026-11-22T12:54:08Z
+GET,/api/submissions/[id]/,HTTPError('500 Server Error: Internal Server Error for url: /api/submissions/[id]/'),2,2026-11-22T12:54:06Z,2026-11-22T12:54:07Z
+POST,/api/workspace/[id]/events/,HTTPError('500 Server Error: Internal Server Error for url: /api/workspace/[id]/events/'),24,2026-11-22T12:54:06Z,2026-11-22T12:54:12Z
+GET,/api/subjects/,HTTPError('500 Server Error: Internal Server Error for url: /api/subjects/'),24,2026-11-22T12:54:05Z,2026-11-22T12:54:11Z
+GET,/api/executions/[id]/,HTTPError('500 Server Error: Internal Server Error for url: /api/executions/[id]/'),31,2026-11-22T12:54:06Z,2026-11-22T12:54:13Z
+GET,/api/workspace/[id]/,HTTPError('500 Server Error: Internal Server Error for url: /api/workspace/[id]/'),16,2026-11-22T12:54:06Z,2026-11-22T12:54:12Z
+POST,/api/auth/login/,"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",17,2026-11-22T12:54:01Z,2026-11-22T12:54:03Z
+GET,/api/practicals/?subject=[id],HTTPError('500 Server Error: Internal Server Error for url: /api/practicals/?subject=[id]'),8,2026-11-22T12:54:06Z,2026-11-22T12:54:13Z

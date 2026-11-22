@@ -1,0 +1,7 @@
+Count,Message,Traceback,Nodes
+3,No tasks defined on TeacherUser. Use the @task decorator or set the 'tasks' attribute of the User (or mark it as abstract = True if you only intend to subclass it),"  File ""D:\v\LABORA-Test-Windows\server\backend\.venv\Lib\site-packages\locust\user\task.py"", line 358, in run
+    self.schedule_task(self.get_next_task())
+                       ^^^^^^^^^^^^^^^^^^^^
+  File ""D:\v\LABORA-Test-Windows\server\backend\.venv\Lib\site-packages\locust\user\task.py"", line 502, in get_next_task
+    raise Exception(
+",local
