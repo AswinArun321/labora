@@ -6,3 +6,9 @@ server/backend/.seeded
 
 # Large executable files
 Secure Browser/LABORA Secure Browser.exe
+
+# Local environment secrets
+/deploy/.env
+
+# Local load-testing environment
+/.venv-loadtest/
