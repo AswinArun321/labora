@@ -21,7 +21,10 @@ import os
 import random
 import time
 import gevent
+import urllib3
 from locust import HttpUser, task, tag, between, events
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 SAMPLE_PYTHON_CODE = [
@@ -47,6 +50,9 @@ class StudentUser(HttpUser):
 
     def on_start(self):
         """Simulate realistic student login and session bootstrap"""
+        if os.environ.get("LOCUST_INSECURE_SSL", "true").lower() in ("1", "true", "yes"):
+            self.client.verify = False
+
         self.max_students = int(os.environ.get("LOAD_TEST_STUDENT_COUNT", "1000"))
         self.student_num = random.randint(1, self.max_students)
         self.username = f"load_student_{self.student_num:04d}"
@@ -167,10 +173,15 @@ class TeacherUser(HttpUser):
     wait_time = between(5, 10)
 
     def on_start(self):
-        """Simulate teacher login"""
+        """Simulate teacher login and session bootstrap"""
+        if os.environ.get("LOCUST_INSECURE_SSL", "true").lower() in ("1", "true", "yes"):
+            self.client.verify = False
+
         self.username = os.environ.get("LOAD_TEST_TEACHER", "load_teacher")
         self.password = os.environ.get("LOAD_TEST_PASSWORD", "LoadTest123!")
         self.token = None
+        self.practical_id = None
+        self.submission_ids = []
 
         resp = self.client.post("/api/auth/login/", json={
             "username": self.username,
@@ -181,20 +192,39 @@ class TeacherUser(HttpUser):
             self.token = resp.json().get("access")
             self.client.headers.update({"Authorization": f"Bearer {self.token}"})
 
+            # Dynamically discover active subject and practical
+            subj_res = self.client.get("/api/subjects/", name="/api/subjects/")
+            if subj_res.status_code == 200 and len(subj_res.json()) > 0:
+                subj_id = subj_res.json()[0]["id"]
+                prac_res = self.client.get(f"/api/practicals/?subject={subj_id}", name="/api/practicals/?subject=[id]")
+                if prac_res.status_code == 200 and len(prac_res.json()) > 0:
+                    self.practical_id = prac_res.json()[0]["id"]
+
+        if not self.practical_id:
+            self.practical_id = int(os.environ.get("DEFAULT_PRACTICAL_ID", "1"))
+
     @task(4)
     @tag('teacher', 'browsing')
     def view_dashboard(self):
         """Monitor student progress dashboard and review indicators"""
         if not self.token:
             return
-        practical_id = int(os.environ.get("DEFAULT_PRACTICAL_ID", "1"))
-        self.client.get(f"/api/practicals/{practical_id}/submissions/", name="/api/practicals/[id]/submissions/")
+        practical_id = self.practical_id or int(os.environ.get("DEFAULT_PRACTICAL_ID", "1"))
+        res = self.client.get(f"/api/practicals/{practical_id}/submissions/", name="/api/practicals/[id]/submissions/")
+        if res.status_code == 200:
+            try:
+                rows = res.json()
+                valid_subs = [r["submission_id"] for r in rows if r.get("submission_id")]
+                if valid_subs:
+                    self.submission_ids = valid_subs
+            except Exception:
+                pass
 
     @task(2)
     @tag('teacher', 'browsing')
     def view_student_detail(self):
         """Inspect student submission detail"""
-        if not self.token:
+        if not self.token or not self.submission_ids:
             return
-        sub_id = random.randint(1, 10)
+        sub_id = random.choice(self.submission_ids)
         self.client.get(f"/api/submissions/{sub_id}/", name="/api/submissions/[id]/")
